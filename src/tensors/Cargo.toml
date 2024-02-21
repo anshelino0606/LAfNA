@@ -1,6 +1,5 @@
-workspace = { members = ["src/tensors"] }
 [package]
-name = "LAfNA"
+name = "tensors"
 version = "0.1.0"
 edition = "2021"
 

@@ -5,3 +5,7 @@ version = 3
 [[package]]
 name = "LAfNA"
 version = "0.1.0"
+
+[[package]]
+name = "tensors"
+version = "0.1.0"
