@@ -106,21 +106,21 @@ impl Matrix
     }
 
     // Method to multiply two matrices
-    fn multiply(&self, other: &Matrix) -> Option<Matrix> {
-        if self.cols != other.rows {
-            return None; // Incompatible dimensions
-        }
-
-        let mut result = Matrix::new(self.rows, other.cols);
-        for i in 0..self.rows {
-            for j in 0..other.cols {
-                result.data[i][j] = (0..self.cols)
-                    .map(|k| self.data[i][k].clone() * other.data[k][j].clone())
-                    .sum();
-            }
-        }
-        Some(result)
-    }
+    // fn multiply(&self, other: &Matrix) -> Option<Matrix> {
+    //     if self.cols != other.rows {
+    //         return None; // Incompatible dimensions
+    //     }
+    //
+    //     let mut result = Matrix::new(self.rows, other.cols);
+    //     for i in 0..self.rows {
+    //         for j in 0..other.cols {
+    //             result.data[i][j] = (0..self.cols)
+    //                 .map(|k| self.data[i][k].clone() * other.data[k][j].clone())
+    //                 .sum();
+    //         }
+    //     }
+    //     Some(result)
+    // }
 
     // Swap two rows by indices
     fn swap_rows(&mut self, row1: usize, row2: usize) {
@@ -225,6 +225,44 @@ impl Matrix
     // Method to set an element of the matrix
     pub fn set(&mut self, row: usize, col: usize, value: f64) {
         self.data[row][col] = value;
+    }
+
+    pub fn transpose(&self) -> Matrix {
+        let mut transposed = Matrix::new(self.cols, self.rows);
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                transposed.data[j][i] = self.data[i][j];
+            }
+        }
+        transposed
+    }
+
+    pub fn multiply(&self, other: &Matrix) -> Result<Matrix, &'static str> {
+        if self.cols != other.rows {
+            return Err("Matrix dimensions do not match for multiplication.");
+        }
+        let mut result = Matrix::new(self.rows, other.cols);
+        for i in 0..self.rows {
+            for j in 0..other.cols {
+                for k in 0..self.cols {
+                    result.data[i][j] += self.data[i][k] * other.data[k][j];
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn multiply_vector(&self, vector: &Vec<f64>) -> Result<Vec<f64>, &'static str> {
+        if self.cols != vector.len() {
+            return Err("Dimensions do not match for multiplication.");
+        }
+        let mut result = vec![0.0; self.rows];
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                result[i] += self.data[i][j] * vector[j];
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -440,6 +478,84 @@ mod numerical_methods {
         Ok(x)
     }
 
+    pub fn utu(u: &Matrix) -> Result<Matrix, &'static str> {
+        let u_transposed = u.transpose();
+        u_transposed.multiply(u)
+    }
+
+    pub fn cholesky_decompose(matrix: &Matrix) -> Result<Matrix, &'static str> {
+        if matrix.rows != matrix.cols {
+            return Err("Matrix must be square.");
+        }
+
+        let n = matrix.rows;
+        let mut l = Matrix::new(n, n);
+
+        for i in 0..n {
+            for j in 0..=i {
+                let mut sum = 0.0;
+
+                // Summation for diagonals
+                if j == i {
+                    for k in 0..j {
+                        sum += l.data[j][k] * l.data[j][k];
+                    }
+                    let val = matrix.data[j][j] - sum;
+                    if val <= 0.0 {
+                        return Err("Matrix is not positive definite.");
+                    }
+                    l.data[j][j] = val.sqrt();
+                } else {
+                    // Summation for non-diagonals
+                    for k in 0..j {
+                        sum += l.data[i][k] * l.data[j][k];
+                    }
+                    if l.data[j][j] == 0.0 {
+                        return Err("Division by zero encountered.");
+                    }
+                    l.data[i][j] = (matrix.data[i][j] - sum) / l.data[j][j];
+                }
+            }
+        }
+
+        Ok(l)
+    }
+
+    pub fn solve_spd(matrix: &Matrix, b: Vec<f64>) -> Result<Vec<f64>, &'static str> {
+        // Perform Cholesky decomposition to get L where A = LL^T
+        let l = cholesky_decompose(&matrix)?;
+
+        // Solve Ly = b using forward substitution
+        let y = forward_substitution(&l, &b)?;
+
+        // Transpose L to get L^T
+        let lt = l.transpose();
+
+        // Solve L^Tx = y using back substitution
+        let x = back_substitution(&lt, &y)?;
+
+        Ok(x)
+    }
+
+    pub fn solve_utu(u: &Matrix, b: &Vec<f64>) -> Result<Vec<f64>, &'static str> {
+        if u.rows != b.len() {
+            return Err("Dimensions of U and b do not match.");
+        }
+
+        // Compute U^Tb
+        let ut = u.transpose();
+        let utb = ut.multiply_vector(b)?;
+
+        // Compute U^TU
+        let utu = ut.multiply(u)?;
+
+        // Now solve U^TUx = U^Tb. Assuming you have a method to solve such systems,
+        // possibly through Cholesky decomposition if U^TU is positive definite.
+        // This placeholder assumes such a method is implemented.
+        let x = solve_spd(&utu, utb)?;
+
+        Ok(x)
+    }
 
 }
 
@@ -477,21 +593,33 @@ fn main() {
 
     let a = Matrix {
         data: vec![
-            vec![1.0, 2.0, 3.0],
-            vec![0.0, 4.0, 5.0],
-            vec![1.0, 0.0, 6.0]
+            vec![4.0, 12.0],
+            vec![12.0, 37.0],
         ],
-        rows: 3,
-        cols: 3
+        rows: 2,
+        cols: 2,
     };
+    let b = vec![16.0, 43.0];
 
-    // Perform LU factorization (not shown here; assuming 'lu' is a method that does it and returns PQLU)
-    let PQLU { l, u } = numerical_methods::lu(&a);
-    println!("{}", &u);
-    println!("{}", &l);
+    // Test Cholesky Decomposition and solve SPD
+    match numerical_methods::solve_spd(&a, b.clone()) {
+        Ok(x) => println!("solve_spd solution: {:?}", x),
+        Err(e) => println!("solve_spd error: {}", e),
+    }
 
-    // Calculate the determinant using U
-    let det_a = numerical_methods::det_lu(&a);
+    // Assuming we have a function to perform LU decomposition and obtain L and U
+    // Note: This requires having an `lu` function implemented as described
+    let pqlu = numerical_methods::lu(&a); // Placeholder for actual LU decomposition
 
-    println!("The determinant of matrix A is {}", det_a);
+    // Test solving with LU
+    match numerical_methods::solve_lu(&a, b.clone()) {
+        Ok(x) => println!("solve_lu solution: {:?}", x),
+        Err(e) => println!("solve_lu error: {}", e),
+    }
+
+    // Test solving U^TUx = U^Tb
+    match numerical_methods::solve_utu(&pqlu.u, &b) {
+        Ok(x) => println!("solve_utu solution: {:?}", x),
+        Err(e) => println!("solve_utu error: {}", e),
+    }
 }
