@@ -20,6 +20,14 @@ struct Matrix {
     cols: usize,
 }
 
+#[derive(Debug)]
+pub struct PQLU {
+   // pub p: Vec<usize>, // Permutation matrix for rows
+   // pub q: Vec<usize>, // Permutation matrix for columns
+    pub l: Matrix,
+    pub u: Matrix,
+}
+
 impl Matrix
 {
     // Constructor for a new Matrix with given rows and columns, initialized to default for type T
@@ -97,7 +105,7 @@ impl Matrix
         }
     }
 
-    // Method to multiply two matries
+    // Method to multiply two matrices
     fn multiply(&self, other: &Matrix) -> Option<Matrix> {
         if self.cols != other.rows {
             return None; // Incompatible dimensions
@@ -209,6 +217,15 @@ impl Matrix
 
         Ok(Matrix { data, rows, cols })
     }
+
+    pub fn get(&self, row: usize, col: usize) -> f64 {
+        self.data[row][col]
+    }
+
+    // Method to set an element of the matrix
+    pub fn set(&mut self, row: usize, col: usize, value: f64) {
+        self.data[row][col] = value;
+    }
 }
 
 impl Vector {
@@ -226,9 +243,10 @@ impl Vector {
     }
 }
 
+
 mod numerical_methods {
     use super::Matrix; // Assuming Matrix is defined in the parent module
-
+    use super::PQLU; // Assuming Matrix is defined in the parent module
     pub fn gaussian_elimination(matrix: &mut Matrix) -> Result<f64, &'static str> {
         let n = matrix.rows;
         let mut sign = 1;
@@ -342,6 +360,87 @@ mod numerical_methods {
             cols: matrix.cols,
         })
     }
+
+    pub fn lu(matrix: &Matrix) -> PQLU {
+        let n = matrix.rows;
+        let mut l = Matrix::new(n, n);
+        let mut u = matrix.clone();
+
+        for k in 0..n {
+            // Set the diagonal of L to 1
+            l.data[k][k] = 1.0;
+            for i in k+1..n {
+                l.data[i][k] = u.data[i][k] / u.data[k][k];
+                u.data[i][k] = 0.0; // Explicitly setting to zero to maintain upper triangular form
+                for j in k+1..n {
+                    u.data[i][j] -= l.data[i][k] * u.data[k][j];
+                }
+            }
+        }
+
+        PQLU {
+            l,
+            u
+        }
+    }
+
+    pub fn det_lu(matrix: &Matrix) -> f64 {
+        let pqlu = lu(matrix);
+        let u = pqlu.u;
+        let mut det = 1f64;
+        for i in 0.. u.rows {
+            det *= u.data[i][i];
+        }
+        det
+    }
+
+    pub fn forward_substitution(matrix: &Matrix, b: &Vec<f64>) -> Result<Vec<f64>, &'static str> {
+        let n = matrix.rows;
+        if n != b.len() {
+            return Err("Matrix and vector dimensions do not match");
+        }
+
+        let mut y = vec![0.0; n];
+        for i in 0..n {
+            let mut sum = 0.0;
+            for j in 0..i {
+                sum += matrix.data[i][j] * y[j];
+            }
+            y[i] = (b[i] - sum) / matrix.data[i][i];
+        }
+
+        Ok(y)
+    }
+
+    pub fn back_substitution(matrix: &Matrix, y: &Vec<f64>) -> Result<Vec<f64>, &'static str> {
+        let n = matrix.rows;
+        if n != y.len() {
+            return Err("Matrix and vector dimensions do not match");
+        }
+
+        let mut x = vec![0.0; n];
+        for i in (0..n).rev() {
+            let mut sum = 0.0;
+            for j in (i+1..n).rev() {
+                sum += matrix.data[i][j] * x[j];
+            }
+            x[i] = (y[i] - sum) / matrix.data[i][i];
+        }
+
+        Ok(x)
+    }
+
+    pub fn solve_lu(matrix: &Matrix, b: Vec<f64>) -> Result<Vec<f64>, &'static str> {
+        let PQLU { l, u } = lu(matrix);
+
+        let y = forward_substitution(&l, &b)?;
+
+        let x = back_substitution(&u, &y)?;
+
+        Ok(x)
+    }
+
+
 }
 
 impl fmt::Display for Matrix {
@@ -376,59 +475,23 @@ impl fmt::Display for Vector {
 
 fn main() {
 
-    let mut matrix_a = Matrix {
-        data: vec![vec![2.0, 1.0], vec![1.0, -1.0]],
-        rows: 2,
-        cols: 2,
+    let a = Matrix {
+        data: vec![
+            vec![1.0, 2.0, 3.0],
+            vec![0.0, 4.0, 5.0],
+            vec![1.0, 0.0, 6.0]
+        ],
+        rows: 3,
+        cols: 3
     };
 
-    // Define the vector b
-    let vector_b = vec![3.0, 0.0];
+    // Perform LU factorization (not shown here; assuming 'lu' is a method that does it and returns PQLU)
+    let PQLU { l, u } = numerical_methods::lu(&a);
+    println!("{}", &u);
+    println!("{}", &l);
 
-    // Solve Ax = b
-    match numerical_methods::solve(&matrix_a, vector_b) {
-        Ok(solution) => println!("Solution: {:?}", solution),
-        Err(e) => println!("Error: {}", e),
-    }
+    // Calculate the determinant using U
+    let det_a = numerical_methods::det_lu(&a);
 
-    matrix_a = Matrix {
-        data: vec![vec![2.0, 1.0], vec![1.0, -1.0]],
-        rows: 2,
-        cols: 2,
-    };
-
-    // Invert A
-    match numerical_methods::invert(&matrix_a) {
-        Ok(inverse) => {
-            println!("Inverse of A:");
-            inverse.print(); // Assuming the print method is correctly implemented
-        },
-        Err(e) => println!("Error: {}", e),
-    }
-    let matrix_path = Path::new("matrix.txt");
-    let vector_path = Path::new("vec.txt");
-
-    // Read the matrix and vector from files
-    let matrix = Matrix::from_file(matrix_path).unwrap();
-
-    let vector = Vector::from_file(vector_path).unwrap();
-
-    // Ensure the vector data is suitable for solving Ax = b
-    if vector.len != matrix.rows {
-        eprintln!("Error");
-    }
-
-    // Solve Ax = b using the Gaussian elimination method
-    match numerical_methods::solve(&matrix, vector.data) {
-        Ok(solution) => println!("Solution: {}", Vector { data: solution.clone(), len: solution.len() }),
-        Err(e) => println!("Error: {}", e),
-    };
-
-// Similar adjustment can be made for printing the inverse matrix
-    match numerical_methods::invert(&matrix_a) {
-        Ok(inverse) => {
-            println!("Inverse of A:\n{}", inverse);
-        },
-        Err(e) => println!("Error: {}", e),
-    };
+    println!("The determinant of matrix A is {}", det_a);
 }
