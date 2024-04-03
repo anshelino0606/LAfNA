@@ -192,6 +192,24 @@ impl Matrix
 
         sign
     }
+
+    /// Check if matrix is triadiagonal
+    /// | 1 1 0 0 |
+    /// | 1 1 1 0 |
+    /// | 0 1 1 1 |
+    /// | 0 0 1 1 |
+    pub fn is_tridiagonal(&self) -> bool {
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                if (i != j) && (i != j + 1) && (i + 1 != j) {
+                    if self.data[i][j].abs() > 1e-10 { // Consider as zero if abs value is smaller than epsilon
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
 }
 
 
@@ -557,6 +575,77 @@ mod numerical_methods {
         Ok(x)
     }
 
+    // Solves Ax = d for a tridiagonal matrix A and vector d.
+    // Assumes self is tridiagonal and square.
+    pub fn thompson_algorithm_rs(matrix: &Matrix, d: &Vec<f64>) -> Result<Vec<f64>, &'static str> {
+        if !matrix.is_tridiagonal() {
+            return Err("Matrix is not tridiagonal");
+        }
+        if matrix.rows != d.len() {
+            return Err("Dimension mismatch between matrix and vector");
+        }
+
+        let n = matrix.rows;
+        let mut c_star = vec![0.0; n]; // Modified coefficients
+        let mut d_star = vec![0.0; n]; // Modified vector
+        let mut x = vec![0.0; n];      // Solution vector
+
+        // Forward sweep for c_star and d_star
+        c_star[0] = matrix.get(0, 1) / matrix.get(0, 0);
+        d_star[0] = d[0] / matrix.get(0, 0);
+        for i in 1..n-1 {
+            let denom = matrix.get(i, i) - matrix.get(i, i-1) * c_star[i-1];
+            c_star[i] = matrix.get(i, i+1) / denom;
+            d_star[i] = (d[i] - matrix.get(i, i-1) * d_star[i-1]) / denom;
+        }
+        d_star[n-1] = (d[n-1] - matrix.get(n-1, n-2) * d_star[n-2]) / (matrix.get(n-1, n-1) - matrix.get(n-1, n-2) * c_star[n-2]);
+
+        // Backward substitution for x
+        x[n-1] = d_star[n-1];
+        for i in (0..n-1).rev() {
+            x[i] = d_star[i] - c_star[i] * x[i+1];
+        }
+
+        Ok(x)
+    }
+
+    // Solves Ax = d for a tridiagonal matrix A and vector d using a left-sided sweep.
+    // Assumes self is tridiagonal and square.
+    pub fn thompson_algorithm_ls(matrix: &Matrix, d: &Vec<f64>) -> Result<Vec<f64>, &'static str> {
+        if !matrix.is_tridiagonal() {
+            return Err("Matrix is not tridiagonal");
+        }
+        if matrix.rows != d.len() {
+            return Err("Dimension mismatch between matrix and vector");
+        }
+
+        let n = matrix.rows;
+        let mut b_star = vec![0.0; n]; // Modified coefficients for lower diagonal
+        let mut d_star = vec![0.0; n]; // Modified right-hand side vector
+        let mut x = vec![0.0; n];      // Solution vector
+
+        // Initial values based on the bottom row of the matrix
+        b_star[n-1] = matrix.get(n-1, n-2) / matrix.get(n-1, n-1);
+        d_star[n-1] = d[n-1] / matrix.get(n-1, n-1);
+
+        // Backward sweep for b_star and d_star
+        for i in (1..n-1).rev() {
+            let denom = matrix.get(i, i) - matrix.get(i, i+1) * b_star[i+1];
+            b_star[i] = matrix.get(i, i-1) / denom;
+            d_star[i] = (d[i] - matrix.get(i, i+1) * d_star[i+1]) / denom;
+        }
+        let denom = matrix.get(0, 0) - matrix.get(0, 1) * b_star[1];
+        d_star[0] = (d[0] - matrix.get(0, 1) * d_star[1]) / denom;
+
+        // Forward substitution for x
+        x[0] = d_star[0];
+        for i in 1..n {
+            x[i] = d_star[i] - b_star[i] * x[i-1];
+        }
+
+        Ok(x)
+    }
+
 }
 
 impl fmt::Display for Matrix {
@@ -593,33 +682,18 @@ fn main() {
 
     let a = Matrix {
         data: vec![
-            vec![4.0, 12.0],
-            vec![12.0, 37.0],
+            vec![2.0, -1.0, 0.0],
+            vec![-1.0, 2.0, -1.0],
+            vec![0.0, -1.0, 2.0],
         ],
-        rows: 2,
-        cols: 2,
+        rows: 3,
+        cols: 3,
     };
-    let b = vec![16.0, 43.0];
+    let d = vec![1.0, 2.0, 2.0];
 
-    // Test Cholesky Decomposition and solve SPD
-    match numerical_methods::solve_spd(&a, b.clone()) {
-        Ok(x) => println!("solve_spd solution: {:?}", x),
-        Err(e) => println!("solve_spd error: {}", e),
-    }
-
-    // Assuming we have a function to perform LU decomposition and obtain L and U
-    // Note: This requires having an `lu` function implemented as described
-    let pqlu = numerical_methods::lu(&a); // Placeholder for actual LU decomposition
-
-    // Test solving with LU
-    match numerical_methods::solve_lu(&a, b.clone()) {
-        Ok(x) => println!("solve_lu solution: {:?}", x),
-        Err(e) => println!("solve_lu error: {}", e),
-    }
-
-    // Test solving U^TUx = U^Tb
-    match numerical_methods::solve_utu(&pqlu.u, &b) {
-        Ok(x) => println!("solve_utu solution: {:?}", x),
-        Err(e) => println!("solve_utu error: {}", e),
+    if let Ok(x) = numerical_methods::thompson_algorithm_ls(&a, &d) {
+        println!("Solution: {:?}", x);
+    } else {
+        println!("An error occurred");
     }
 }
