@@ -756,7 +756,7 @@ impl LinearSystem {
         let n = self.b.len();
         let mut x = vec![0.0; n]; // Initial guess (x_0)
         let mut x_prev = vec![0.0; n]; // To store the previous iteration's values for convergence check
-        let mut error;
+        let mut error = 0.0;
         let mut iterations = 0;
 
         for _ in 0..max_iterations {
