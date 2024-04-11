@@ -678,22 +678,161 @@ impl fmt::Display for Vector {
     }
 }
 
-fn main() {
+struct LinearSystem {
+    // Solve Ax = b
+    pub a: Vec<Vec<f64>>,
+    pub b: Vec<f64>,
+}
 
-    let a = Matrix {
-        data: vec![
-            vec![2.0, -1.0, 0.0],
-            vec![-1.0, 2.0, -1.0],
-            vec![0.0, -1.0, 2.0],
-        ],
-        rows: 3,
-        cols: 3,
-    };
-    let d = vec![1.0, 2.0, 2.0];
-
-    if let Ok(x) = numerical_methods::thompson_algorithm_ls(&a, &d) {
-        println!("Solution: {:?}", x);
-    } else {
-        println!("An error occurred");
+impl LinearSystem {
+    fn new(a: Vec<Vec<f64>>, b: Vec<f64>) -> Self {
+        Self { a, b }
     }
+
+    // Method stubs for solvers
+    fn jacobi(&self, tolerance: f64, max_iterations: usize) -> (Vec<f64>, f64, usize) {
+        let n = self.b.len();
+        let mut x = vec![0.0; n]; // Initial guess (x_0)
+        let mut x_prev = x.clone();
+        let mut error = 0.0;
+        let mut iterations = 0;
+
+        for _ in 0..max_iterations {
+            for i in 0..n {
+                let mut sum = 0.0;
+                for j in 0..n {
+                    if i != j {
+                        sum += self.a[i][j] * x_prev[j];
+                    }
+                }
+                x[i] = (self.b[i] - sum) / self.a[i][i];
+            }
+
+            // Calculate the norm of the difference between successive approximations
+            error = x.iter().zip(x_prev.iter()).fold(0.0, |acc, (&xi, &prev_xi)| acc + (xi - prev_xi).powi(2)).sqrt();
+            if error < tolerance {
+                break;
+            }
+
+            x_prev = x.clone();
+            iterations += 1;
+        }
+
+        (x, error, iterations)
+    }
+    fn gauss_seidel(&self, tolerance: f64, max_iterations: usize) -> (Vec<f64>, f64, usize) {
+        let n = self.b.len();
+        let mut x = vec![0.0; n]; // Initial guess (x_0)
+        let mut x_prev = x.clone(); // To store the previous iteration's values for convergence check
+        let mut error = 0.0;
+        let mut iterations = 0;
+
+        for _ in 0..max_iterations {
+            for i in 0..n {
+                let mut sum_before = 0.0;
+                let mut sum_after = 0.0;
+                for j in 0..i {
+                    sum_before += self.a[i][j] * x[j]; // Use the latest available values
+                }
+                for j in i+1..n {
+                    sum_after += self.a[i][j] * x_prev[j]; // Use values from the previous iteration
+                }
+                x[i] = (self.b[i] - sum_before - sum_after) / self.a[i][i];
+            }
+
+            // Calculate the norm of the difference between successive approximations
+            error = x.iter().zip(x_prev.iter()).fold(0.0, |acc, (&xi, &prev_xi)| acc + (xi - prev_xi).powi(2)).sqrt();
+            if error < tolerance {
+                break;
+            }
+
+            x_prev = x.clone();
+            iterations += 1;
+        }
+
+        (x, error, iterations)
+    }
+    fn sor(&self, omega: f64, tolerance: f64, max_iterations: usize) -> (Vec<f64>, f64, usize) {
+        let n = self.b.len();
+        let mut x = vec![0.0; n]; // Initial guess (x_0)
+        let mut x_prev = vec![0.0; n]; // To store the previous iteration's values for convergence check
+        let mut error;
+        let mut iterations = 0;
+
+        for _ in 0..max_iterations {
+            for i in 0..n {
+                let mut sum_before = 0.0; // Sum for j < i using latest x
+                let mut sum_after = 0.0; // Sum for j > i using x from the previous iteration
+                for j in 0..i {
+                    sum_before += self.a[i][j] * x[j];
+                }
+                for j in i+1..n {
+                    sum_after += self.a[i][j] * x_prev[j];
+                }
+                let x_new = (self.b[i] - sum_before - sum_after) / self.a[i][i];
+                x[i] = x_prev[i] + omega * (x_new - x_prev[i]); // Apply relaxation
+            }
+
+            // Calculate the norm of the difference between successive approximations
+            error = x.iter().zip(x_prev.iter()).fold(0.0, |acc, (&xi, &prev_xi)| acc + (xi - prev_xi).powi(2)).sqrt();
+            if error < tolerance {
+                break;
+            }
+
+            x_prev = x.clone();
+            iterations += 1;
+        }
+
+        (x, error, iterations)
+    }
+
+    // TODO: Helper methods for input, convergence check, etc.
+    // TODO: ORGANIZE EVERYTHING (THIS IS A MESS)
+}
+
+fn thompson_algorithm_optimized(diag_main: &[f64], diag_sub: &[f64], diag_sup: &[f64], rhs: &[f64]) -> Vec<f64> {
+    let n = diag_main.len();
+    let mut c_prime = vec![0.0; n];
+    let mut d_prime = vec![0.0; n];
+    let mut y = vec![0.0; n];
+
+    // Forward sweep
+    c_prime[0] = diag_sup[0] / diag_main[0];
+    d_prime[0] = rhs[0] / diag_main[0];
+    for i in 1..n {
+        let m = diag_main[i] - diag_sub[i-1] * c_prime[i-1];
+        c_prime[i] = if i < n-1 { diag_sup[i] / m } else { 0.0 };
+        d_prime[i] = (rhs[i] - diag_sub[i-1] * d_prime[i-1]) / m;
+    }
+
+    // Backward substitution
+    y[n-1] = d_prime[n-1];
+    for i in (0..n-1).rev() {
+        y[i] = d_prime[i] - c_prime[i] * y[i+1];
+    }
+
+    y
+}
+
+fn main() {
+    // Example linear system (A * x = b)
+    let a = vec![
+        vec![10.0, -1.0, 2.0, 0.0],
+        vec![-1.0, 11.0, -1.0, 3.0],
+        vec![2.0, -1.0, 10.0, -1.0],
+        vec![0.0, 3.0, -1.0, 8.0],
+    ];
+    let b = vec![6.0, 25.0, -11.0, 15.0];
+
+    // Create a LinearSystem instance
+    let system = LinearSystem::new(a, b);
+
+    // Solve the system using the Jacobi method
+    let tolerance = 1e-10; // Convergence tolerance
+    let max_iterations = 100; // Maximum number of iterations
+    let (solution, error, iterations) = system.jacobi(tolerance, max_iterations);
+
+    println!("Solution: {:?}", solution);
+    println!("Error: {:?}", error);
+    println!("Iterations: {:?}", iterations);
 }
