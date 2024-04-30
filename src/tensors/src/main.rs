@@ -4,9 +4,10 @@ use core::f64;
 use std::fs::File;
 use std::{fmt, io};
 use std::io::{BufRead, BufReader};
-use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 use std::path::Path;
 use std::str::FromStr;
+use rand::Rng;
 
 struct Vector {
     data: Vec<f64>,
@@ -18,6 +19,15 @@ struct Matrix {
     data: Vec<Vec<f64>>,
     rows: usize,
     cols: usize,
+}
+impl Default for Matrix {
+    fn default() -> Self {
+       Matrix {
+           data: vec![vec![0.0]],
+           rows: 1,
+           cols: 1
+       }
+    }
 }
 
 #[derive(Debug)]
@@ -282,6 +292,19 @@ impl Matrix
         }
         Ok(result)
     }
+
+    pub fn multiply_custom_vector(&self, vector: &Vector) -> Result<Vector, &'static str> {
+        if self.cols != vector.len {
+            return Err("Dimensions do not match for multiplication.");
+        }
+        let mut result_data = vec![0.0; self.rows];
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                result_data[i] += self.data[i][j] * vector.data[j];
+            }
+        }
+        Ok(Vector { data: result_data, len: self.rows })
+    }
 }
 
 impl Vector {
@@ -298,7 +321,21 @@ impl Vector {
         Ok(Vector { data, len })
     }
 }
+impl Index<usize> for Vector {
+    type Output = f64;
 
+    // This method provides read-only access
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.data[index]
+    }
+}
+
+impl IndexMut<usize> for Vector {
+    // This method provides mutable access
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.data[index]
+    }
+}
 
 mod numerical_methods {
     use super::Matrix; // Assuming Matrix is defined in the parent module
@@ -814,25 +851,166 @@ fn thompson_algorithm_optimized(diag_main: &[f64], diag_sub: &[f64], diag_sup: &
     y
 }
 
+impl Matrix {
+    // Method to invert the matrix using Gaussian Elimination
+    pub fn invert(&self) -> Result<Matrix, &'static str> {
+        if self.rows != self.cols {
+            return Err("Inversion requires a square matrix.");
+        }
+
+        let n = self.rows;
+        let mut aug = self.clone();
+
+        // Augment the matrix with the identity matrix of the same size
+        for i in 0..n {
+            aug.data[i].extend(vec![0.0; n]);
+            aug.data[i][n + i] = 1.0;
+        }
+
+        // Perform Gaussian elimination
+        for i in 0..n {
+            if aug.data[i][i] == 0.0 {
+                // Find a row with a non-zero element in the same column
+                let mut swap_row = None;
+                for k in i + 1..n {
+                    if aug.data[k][i] != 0.0 {
+                        swap_row = Some(k);
+                        break;
+                    }
+                }
+                if let Some(k) = swap_row {
+                    aug.data.swap(i, k);
+                } else {
+                    return Err("Matrix is singular and cannot be inverted.");
+                }
+            }
+
+            // Scale the row to make the diagonal element 1
+            let div = aug.data[i][i];
+            for j in 0..2*n {
+                aug.data[i][j] /= div;
+            }
+
+            // Zero out elements in the current column for all other rows
+            for k in 0..n {
+                if k != i {
+                    let factor = aug.data[k][i];
+                    for j in 0..2*n {
+                        aug.data[k][j] -= aug.data[i][j] * factor;
+                    }
+                }
+            }
+        }
+
+        // Extract the inverse part of the augmented
+        let mut inverse_data = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            inverse_data[i] = aug.data[i][n..2*n].to_vec();
+        }
+
+        Ok(Matrix {
+            data: inverse_data,
+            rows: n,
+            cols: n,
+        })
+    }
+}
+
+mod eigenvalue_methods {
+    use rand::Rng;
+    use super::Matrix;
+    use super::Vector;
+
+
+    pub fn power_iteration(matrix: &Matrix, num_iterations: usize, tolerance: f64) -> Result<(Vector, f64, usize), &'static str> {
+        let mut rng = rand::thread_rng();
+
+        // Start with a random vector
+        let mut b_k = Vector {
+            data: (0..matrix.cols).map(|_| rng.gen_range(0.0..1.0)).collect(),
+            len: matrix.cols,
+        };
+
+        let mut eigenvalue = 0.0;
+        let mut previous_eigenvalue = 0.0;
+        let mut iter = 0;
+
+        for iteration in 0..num_iterations {
+            let b_k1 = matrix.multiply_custom_vector(&b_k)?;
+
+            let norm = b_k1.data.iter().fold(0.0, |acc, &val| acc + (val * val).sqrt());
+
+            b_k = Vector {
+                data: b_k1.data.iter().map(|&x| x / norm).collect(),
+                len: b_k1.len,
+            };
+
+            // Update the eigenvalue using the Rayleigh quotient
+            // Rayleigh quotient R(v) = (v^T * A * v) / (v^T * v)
+            let Av = matrix.multiply_custom_vector(&b_k)?;
+            let numerator = b_k.data.iter().zip(Av.data.iter()).map(|(&v_i, &Av_i)| v_i * Av_i).sum::<f64>();
+            let denominator = b_k.data.iter().map(|&v_i| v_i * v_i).sum::<f64>();
+            previous_eigenvalue = eigenvalue;
+            eigenvalue = numerator / denominator;
+
+            // Check for convergence
+            if (eigenvalue - previous_eigenvalue).abs() < tolerance {
+                iter = iteration + 1; // Record the number of iterations it took to converge
+                break;
+            }
+        }
+
+        Ok((b_k, eigenvalue, iter))
+    }
+
+    pub fn inverse_power_iteration(matrix: &Matrix, num_iterations: usize, tolerance: f64) -> Result<(Vector, f64, usize), &'static str> {
+        let matrix_inv = matrix.invert().map_err(|_| "Matrix inversion failed")?;
+
+        let mut rng = rand::thread_rng();
+        let mut b_k = Vector {
+            data: (0..matrix.cols).map(|_| rng.gen_range(0.0..1.0)).collect(),
+            len: matrix.cols,
+        };
+
+        let mut eigenvalue = 0.0;
+        let mut previous_eigenvalue = 0.0;
+        let mut iter = 0;
+
+        for iteration in 0..num_iterations {
+            let b_k1 = matrix_inv.multiply_custom_vector(&b_k)?;
+
+            let norm = b_k1.data.iter().fold(0.0, |acc, &val| acc + (val * val).sqrt());
+            b_k = Vector {
+                data: b_k1.data.iter().map(|&x| x / norm).collect(),
+                len: b_k1.len,
+            };
+
+            let Av = matrix_inv.multiply_custom_vector(&b_k)?;
+            let numerator = b_k.data.iter().zip(Av.data.iter()).map(|(&v_i, &Av_i)| v_i * Av_i).sum::<f64>();
+            let denominator = b_k.data.iter().map(|&v_i| v_i * v_i).sum::<f64>();
+            previous_eigenvalue = eigenvalue;
+            eigenvalue = numerator / denominator;
+
+            if (eigenvalue - previous_eigenvalue).abs() < tolerance {
+                iter = iteration + 1;
+                break;
+            }
+        }
+
+        eigenvalue = 1.0 / eigenvalue; // Since we are using the inverse, we need to invert the eigenvalue.
+        Ok((b_k, eigenvalue, iter))
+    }
+}
+
+
 fn main() {
-    // Example linear system (A * x = b)
-    let a = vec![
-        vec![10.0, -1.0, 2.0, 0.0],
-        vec![-1.0, 11.0, -1.0, 3.0],
-        vec![2.0, -1.0, 10.0, -1.0],
-        vec![0.0, 3.0, -1.0, 8.0],
-    ];
-    let b = vec![6.0, 25.0, -11.0, 15.0];
+    let path = "matrix.txt";
+    let matrix = Matrix::from_file(path).unwrap_or_default();
 
-    // Create a LinearSystem instance
-    let system = LinearSystem::new(a, b);
+    let tolerance = 1e-6;
 
-    // Solve the system using the Jacobi method
-    let tolerance = 1e-10; // Convergence tolerance
-    let max_iterations = 100; // Maximum number of iterations
-    let (solution, error, iterations) = system.jacobi(tolerance, max_iterations);
-
-    println!("Solution: {:?}", solution);
-    println!("Error: {:?}", error);
-    println!("Iterations: {:?}", iterations);
+    let num_iterations = 100;
+    let (dominant_vector, eigenvalue, num_iter) = eigenvalue_methods::power_iteration(&matrix, num_iterations, tolerance).unwrap();
+    println!("Dominant Eigenvector: {:?}", dominant_vector.data);
+    println!("Associated Eigenvalue: {:?}", eigenvalue);
 }
